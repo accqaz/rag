@@ -93,25 +93,32 @@ class KG_retriever(object):
     def retrieve(self, query, data, Gs):
         print("Initial retrieval based on query==============")
         retrieve_graph_idxs = []
-        graph_corpus = [doc['document_type'] for doc in data]
+        graph_corpus = [doc['document_type'] + ' ' + doc['title_chunks'][0][1] for doc in data]
+        # print("graph_corpus", graph_corpus)
         graphs_idx = tf_idf(query, list(range(len(graph_corpus))), graph_corpus, k=5, visited=retrieve_graph_idxs)
-        
+        print("graphs_idx", graphs_idx)
+        seed = query
         all_corpus = []
+        total_k = 60 # 多图一共可以检索到的文档数
         for graph_idx in graphs_idx:
+            print("================================")
+            print("graph_idx", graph_idx)
             G = Gs[graph_idx]
             corpus = [text for _, text in data[graph_idx]['title_chunks']]
             candidates_idx = list(range(len(corpus)))
+            print("corpus length:" + str(len))
+            print("candidates_idx", candidates_idx)
             retrieve_idxs = []
-            seed = query
             prev_length = 0
             count = 0
-            retrieve_num = [10, 5, 5, 5, 3, 2, 2, 2, 2, 2, 2]
-            while len(retrieve_idxs) < self.k:
-                idxs = tf_idf(seed, candidates_idx, corpus, k=retrieve_num[count], visited=retrieve_idxs)
+            retrieve_num = [5, 3, 2, 2]
+            while len(retrieve_idxs) < total_k and count < len(retrieve_num):
+                k_value = retrieve_num[count] if count < len(retrieve_num) else retrieve_num[-1]
+                idxs = tf_idf(seed, candidates_idx, corpus, k = k_value, visited = retrieve_idxs)
                 print("根据种子初步得到的idxs", idxs)
-                retrieve_idxs.extend(idxs[:max(0, self.k - len(retrieve_idxs))])
-                all_corpus.extend([corpus[idx] for idx in idxs])
-
+                retrieve_idxs.extend(idxs[:max(0, total_k - len(retrieve_idxs))])
+                print("retrieve_idxs", retrieve_idxs)
+                
                 candidates_idx = set(chain(*[list(G.neighbors(node)) for node in idxs]))
                 candidates_idx = list(candidates_idx.difference(retrieve_idxs))
 
@@ -121,9 +128,11 @@ class KG_retriever(object):
                     prev_length = len(retrieve_idxs)
                 
                 count += 1
+            all_corpus.extend([corpus[idx] for idx in retrieve_idxs])
+            corpus = [] # 一个图遍历完之后，清空
 
         # 去重并选择相似度最高的前 10 个文档
-        return tf_idf_sort(query, all_corpus, 10)
+        return tf_idf_sort(query, all_corpus, self.k)
 
         
 

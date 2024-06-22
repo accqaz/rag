@@ -17,6 +17,7 @@ def tf_idf(seed, candidates_idx, corpus, k, visited):
         query_emb = vectorizer.transform([seed])
         cosine_sim = cosine_similarity(query_emb, tfidf_matrix).flatten()
         idxs = cosine_sim.argsort()[::-1]
+        print("tf_idf+idxs:", idxs)
 
         tmp_idxs = []
         for idx in idxs:
