@@ -9,7 +9,7 @@ from llama_index.core.schema import Document, MetadataMode
 from llama_index.vector_stores.qdrant import QdrantVectorStore
 from qdrant_client import AsyncQdrantClient, models
 from qdrant_client.http.exceptions import UnexpectedResponse
-
+from llama_index.core.schema import BaseNode
 from custom.template import SUMMARY_EXTRACT_TEMPLATE
 from custom.transformation import CustomFilePathExtractor, CustomTitleExtractor
 
@@ -44,6 +44,48 @@ def build_pipeline(
     ]
 
     return IngestionPipeline(transformations=transformation, vector_store=vector_store)
+
+
+async def build_chunk() -> IngestionPipeline:
+    transformation = [
+        SentenceSplitter(chunk_size=1024, chunk_overlap=50),
+        CustomTitleExtractor(metadata_mode=MetadataMode.EMBED),
+        CustomFilePathExtractor(last_path_length=4, metadata_mode=MetadataMode.EMBED),
+        # SummaryExtractor(
+        #     llm=llm,
+        #     metadata_mode=MetadataMode.EMBED,
+        #     prompt_template=template or SUMMARY_EXTRACT_TEMPLATE,
+        # ),
+        # embed_model,
+    ]
+
+    return IngestionPipeline(transformations=transformation)
+    # chunked_docs = []
+    
+    # sentence_splitter = SentenceSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    # title_extractor = CustomTitleExtractor(metadata_mode=MetadataMode.EMBED)
+    # file_path_extractor = CustomFilePathExtractor(last_path_length=4, metadata_mode=MetadataMode.EMBED)
+    
+    # for doc in docs:
+    #     # Split document into chunks
+    #     chunks = sentence_splitter.split_text(doc.text)
+    #     base_nodes = [BaseNode(text=chunk, metadata=doc.metadata) for chunk in chunks]
+        
+    #     # Extract metadata
+    #     extracted_metadata_title = await title_extractor.aextract(base_nodes)
+    #     extracted_metadata_path = await file_path_extractor.aextract(base_nodes)
+        
+    #     for node, title_meta, path_meta in zip(base_nodes, extracted_metadata_title, extracted_metadata_path):
+    #         node.metadata.update(title_meta)
+    #         node.metadata.update(path_meta)
+    #         chunked_docs.append({
+    #             'document_title': node.metadata['document_title'],
+    #             'text': node.text,
+    #             'metadata': node.metadata,
+    #         })
+    
+    # return chunked_docs
+
 
 
 async def build_vector_store(

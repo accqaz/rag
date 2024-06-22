@@ -111,7 +111,11 @@ async def generation_with_knowledge_retrieval(
     query_bundle = QueryBundle(query_str=query_str)
     node_with_scores = await retriever.aretrieve(query_bundle)
     if debug:
-        print(f"retrieved:\n{node_with_scores}\n------")
+        # print(f"retrieved:\n{node_with_scores}\n------")
+        for node_with_score in node_with_scores:
+            node = node_with_score.node
+            score = node_with_score.score
+            print(f"Node:\nMetadata: {node.metadata}\nText: {node.text}\nScore: {score}\n------")
     if reranker:
         node_with_scores = reranker.postprocess_nodes(node_with_scores, query_bundle)
         if debug:
