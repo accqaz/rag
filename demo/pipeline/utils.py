@@ -5,7 +5,6 @@ import spacy
 import requests
 import json
 
-nlp = spacy.load('zh_core_web_sm')
 
 
 def tf_idf(seed, candidates_idx, corpus, k, visited):

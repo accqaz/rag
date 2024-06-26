@@ -49,15 +49,18 @@ class CustomTitleExtractor(BaseExtractor):
             # 提取并设置document_type
             file_path = node.metadata["file_path"]
             try:
-                path_parts = file_path.split("\\")
-                #print(f"path_parts: {path_parts}")
+                path_parts = file_path.split("/")
+                print(f"path_parts: {path_parts}")
                 data_index = path_parts.index("data")
                 document_type = path_parts[data_index + 2] if data_index + 2 < len(path_parts) else "unknown"
-                #print(f"Document type extracted: {document_type}")
+                graph_type = path_parts[data_index + 1] if data_index + 1 < len(path_parts) else "unknown"
+                print(f"Document type extracted: {document_type}")
             except (ValueError, IndexError):
                 document_type = "unknown"
+                graph_type = "unknown"
                 #print("Document type extraction failed.")
             node.metadata["document_type"] = document_type
+            node.metadata["graph_type"] = graph_type
 
             metadata_list.append(node.metadata)
         print("data has been extracted!")

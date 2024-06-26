@@ -1,9 +1,10 @@
 import asyncio
-from kg.graph_construct import tfidf_kw_extract, kw_process_graph, knn_graph_construct, knn_embs_construct, visualize_graphs
+import torch.multiprocessing as mp
+from kg.graph_construct import knn_graph_construct, knn_embs_construct, visualize_graphs
 from dotenv import dotenv_values
 from llama_index.core import Settings
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-from llama_index.legacy.llms import OpenAILike as OpenAI
+from llama_index.llms.ollama import Ollama
 from qdrant_client import models
 from tqdm.asyncio import tqdm
 from pipeline.ingestion import read_data, build_chunk
@@ -14,6 +15,7 @@ import pickle as pkl
 from pipeline.retriever import *
 import json
 from json import dumps, loads
+import os
 
 QA_TEMPLATE = """\
     上下文信息如下：
@@ -51,11 +53,8 @@ async def main():
     config = dotenv_values(".env")
 
     # 初始化 LLM 嵌入模型 和 Reranker
-    llm = OpenAI(
-        api_key=config["GLM_KEY"],
-        model="glm-4",
-        api_base="https://open.bigmodel.cn/api/paas/v4/",
-        is_chat_model=True,
+    llm = Ollama(
+        model="qwen", base_url=config["OLLAMA_URL"], temperature=0, request_timeout=120
     )
     embeding = HuggingFaceEmbedding(
         model_name="BAAI/bge-small-zh-v1.5",
@@ -64,9 +63,9 @@ async def main():
     )
     Settings.embed_model = embeding
 
-    retriever = KG_retriever(k = 5)
+    retriever = KG_retriever(k = 20)
     queries = read_jsonl("question.jsonl")
-    queries = queries[:2]
+    #queries = queries[:2]
 
     data = read_data("data")
     pipeline = await build_chunk()
@@ -76,44 +75,57 @@ async def main():
     # with open("processed_data.json", "w", encoding='utf-8') as f:
     #     json.dump([doc.to_dict() for doc in processed_data], f, ensure_ascii=False, indent=4)
     
-    # 创建一个字典来根据 document_type 合并文档
-    doc_dict = {}
+    # 创建一个字典来根据 graph_type 和 document_type 合并文档
+    graph_type_dict = {}
     for doc in processed_data:
+        graph_type = doc.metadata['graph_type']
         doc_type = doc.metadata['document_type']
-        if doc_type not in doc_dict:
-            doc_dict[doc_type] = []
-        doc_dict[doc_type].append((doc.metadata['document_title'], doc.text))
+        if graph_type not in graph_type_dict:
+            graph_type_dict[graph_type] = {}
+        if doc_type not in graph_type_dict[graph_type]:
+            graph_type_dict[graph_type][doc_type] = []
+        graph_type_dict[graph_type][doc_type].append((doc.metadata['document_title'], doc.text))
     
     # 将字典转换为所需格式的列表
-    formatted_docs = [{'idx': idx, 'document_type': doc_type, 'title_chunks': title_chunks} for idx, (doc_type, title_chunks) in enumerate(doc_dict.items())]
-    # # 将 formatted_docs 保存到文件中
-    # with open("formatted_docs_emplus.json", "w", encoding='utf-8') as f:
-    #     json.dump(formatted_docs, f, ensure_ascii=False, indent=4)
+    formatted_docs_dict = {}
+    for graph_type, doc_dict in graph_type_dict.items():
+        formatted_docs_dict[graph_type] = [{'idx': idx, 'document_type': doc_type, 'title_chunks': title_chunks} for idx, (doc_type, title_chunks) in enumerate(doc_dict.items())]
 
-    dataset = "emplus"
-    knn_embs_construct(dataset, formatted_docs, 8)
-    #Gs = pkl.load(open('./emplus/knn_embs.pkl', 'rb'))
-    Gs = knn_graph_construct(dataset, formatted_docs, 10, 8)
-    print("KG loaded successfully.")
-    print(type(Gs))
+    print(f"graph_type docs keys: {list(graph_type_dict.keys())}")
+    print(f"Formatted docs keys: {list(formatted_docs_dict.keys())}")
+    dataset = "data"
+    subfolders = [f.name for f in os.scandir(dataset) if f.is_dir()]
+    print(f"subfolders: {subfolders}")
+
+    Gs = {}
+    for folder in subfolders:
+        print("1111111111111111111")
+        if folder in formatted_docs_dict:
+            print(folder)
+            knn_embs_construct(folder, formatted_docs_dict[folder], 1)
+            Gs[folder] = knn_graph_construct(folder, formatted_docs_dict[folder], 5, 1)
+            # 可视化图并保存
+            # output_dir = f'./{folder}_graphs'
+            # visualize_graphs(Gs[folder], output_dir)
+
+    print("KGs加载成功。")
+    print({k: type(v) for k, v in Gs.items()})
 
     results = []
 
     # 使用检索器进行检索并生成答案
     for query in tqdm(queries, desc="Processing queries"):
-        retrieved_docs = retriever.retrieve(query["query"], formatted_docs, Gs)
-        qa_prompt_template = PromptTemplate(input_variables=["context_str", "query_str"], template=QA_TEMPLATE)
-        final_query = qa_prompt_template.format(context_str='\n'.join(retrieved_docs), query_str=query["query"])
-        final_answer = await llm.acomplete(final_query)
-        results.append(final_answer)
+        doc_type = query["document"]
+        if doc_type in Gs:
+            print(f"Processing query: {query['query']}, doc_type: {doc_type}")
+            print(f"First data in Gs[doc_type]: {Gs[doc_type][0] if Gs[doc_type] else 'Empty Gs'}")
+            retrieved_docs = retriever.retrieve(query["query"], formatted_docs_dict[doc_type], Gs[doc_type])
+            qa_prompt_template = PromptTemplate(input_variables=["context_str", "query_str"], template=QA_TEMPLATE)
+            final_query = qa_prompt_template.format(context_str='\n'.join(retrieved_docs), query_str=query["query"])
+            final_answer = await llm.acomplete(final_query)
+            results.append(final_answer)
         
-        save_answers(queries, results, "kg_retrieval_result.jsonl")
-
-    # print(results)
-    # # 保存结果
-    # save_answers(results, "answers.jsonl")
-
-
+    save_answers(queries, results, "kg_retrieval_result.jsonl")
 
 
     # # 初始化 数据ingestion pipeline 和 vector store
@@ -159,4 +171,5 @@ async def main():
 
 
 if __name__ == "__main__":
+    mp.set_start_method('spawn')
     asyncio.run(main())

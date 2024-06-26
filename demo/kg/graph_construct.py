@@ -16,21 +16,26 @@ from nltk.corpus import stopwords
 import pickle as pkl
 from sklearn.metrics.pairwise import cosine_similarity
 import jieba
-from nltk.corpus import stopwords as nltk_stopwords
 import os
 import json
 import networkx as nx
 import matplotlib.pyplot as plt
+from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 
+# # 加载NLTK中文停用词
+# stopwords = list(nltk_stopwords.words('chinese'))
 
-# 加载NLTK中文停用词
-stopwords = list(nltk_stopwords.words('chinese'))
+# encoder = SentenceTransformer('multi-qa-MiniLM-L6-cos-v1')
 
-encoder = SentenceTransformer('multi-qa-MiniLM-L6-cos-v1')
+# def preprocess(text):
+#     words = jieba.cut(text)
+#     return ' '.join([word for word in words if word not in stopwords and word.strip()])
 
-def preprocess(text):
-    words = jieba.cut(text)
-    return ' '.join([word for word in words if word not in stopwords and word.strip()])
+embedding = HuggingFaceEmbedding(
+        model_name="BAAI/bge-small-zh-v1.5",
+        cache_folder="./",
+        embed_batch_size=128,
+    )
 
 
 def tfidf_kw_extract_chunk(d, n_kw, ngram_l, ngram_h):
@@ -144,16 +149,16 @@ def knn_embs(i_d):
     # print(idx)
 
     chunks = []
-    preprocessed_chunks = []
+    #preprocessed_chunks = []
     
     for type, chunk in d['title_chunks']:
         # 预处理 chunk
-        preprocessed_chunk = preprocess(chunk)
-        chunks.append(preprocessed_chunk)
-        preprocessed_chunks.append({
-            'original': chunk,
-            'preprocessed': preprocessed_chunk
-        })
+        #preprocessed_chunk = preprocess(chunk)
+        chunks.append(chunk)
+        # preprocessed_chunks.append({
+        #     'original': chunk,
+        #     'preprocessed': preprocessed_chunk
+        # })
 
     # # 将所有 chunk 内容保存到一个 JSON 文件中
     # file_name = f"chunks_{idx}.json"
@@ -167,7 +172,7 @@ def knn_embs(i_d):
     else:
         device = 'cpu'
 
-    emb = encoder.encode(chunks, device=device)
+    emb = embedding._embed(chunks)
 
     return idx, emb
 
@@ -182,24 +187,24 @@ def knn_embs_construct(dataset, docs, num_processes):
     pool.close()
     pool.join()
     # 创建目标目录（如果不存在）
-    output_dir = './{}'.format(dataset)
+    output_dir = './{}'.format("dataset")
     os.makedirs(output_dir, exist_ok=True)
 
-    pkl.dump(embs, open('./{}/knn_embs.pkl'.format(dataset), 'wb'))
+    pkl.dump(embs, open('./{}/{}_embs.pkl'.format("dataset", dataset), 'wb'))
 
-    # # 将 embs 转换为可序列化的格式
-    # def serialize_emb(emb):
-    #     if isinstance(emb, torch.Tensor):
-    #         return emb.tolist()
-    #     elif isinstance(emb, np.ndarray):
-    #         return emb.tolist()
-    #     else:
-    #         return emb
+    # 将 embs 转换为可序列化的格式
+    def serialize_emb(emb):
+        if isinstance(emb, torch.Tensor):
+            return emb.tolist()
+        elif isinstance(emb, np.ndarray):
+            return emb.tolist()
+        else:
+            return emb
 
-    # # 保存到 json 文件
-    # json_embs = [{'idx': idx, 'emb': serialize_emb(emb)} for idx, emb in enumerate(embs)]
-    # with open(f'./{dataset}/knn_embs.json', 'w', encoding='utf-8') as f:
-    #     json.dump(json_embs, f, ensure_ascii=False, indent=4)
+    # 保存到 json 文件
+    json_embs = [{'idx': idx, 'emb': serialize_emb(emb)} for idx, emb in enumerate(embs)]
+    with open(f'./dataset/{dataset}_embs.json', 'w', encoding='utf-8') as f:
+        json.dump(json_embs, f, ensure_ascii=False, indent=4)
 
 def knn_graph(i_d, k_knn, embs, strategy = 'cos'):
     idx, d = i_d
@@ -229,7 +234,7 @@ def knn_graph_construct(dataset, docs, k_knn, num_processes, strategy = 'cos'):
     pool = mp.Pool(num_processes)
     graphs = [None] * len(docs)
     #这个里面的knn_embs.pkl是所有（idx，chunk）对
-    func = partial(knn_graph, k_knn = k_knn, embs = pkl.load(open('./{}/knn_embs.pkl'.format(dataset), 'rb')), strategy = strategy)
+    func = partial(knn_graph, k_knn = k_knn, embs = pkl.load(open('./{}/{}_embs.pkl'.format("dataset", dataset), 'rb')), strategy = strategy)
 
     for idx, G in tqdm(pool.imap_unordered(func, enumerate(docs)), total=len(docs)):
         graphs[idx] = G
@@ -243,7 +248,9 @@ def visualize_graph(G, filename):
     """可视化图并保存为图片文件"""
     pos = nx.spring_layout(G)
     plt.figure(figsize=(10, 10))
+    edge_labels = nx.get_edge_attributes(G, 'weight')
     nx.draw(G, pos, with_labels=True, node_size=500, node_color="skyblue", font_size=10, font_weight="bold", edge_color="gray")
+    nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels)
     plt.savefig(filename)
     plt.close()
 
