@@ -11,12 +11,11 @@ def tf_idf(seed, candidates_idx, corpus, k, visited):
     vectorizer = TfidfVectorizer()
     
     try:
-        tfidf_matrix = vectorizer.fit_transform([corpus[_] for _ in candidates_idx])
-
-        query_emb = vectorizer.transform([seed])
+        tfidf_matrix = vectorizer.fit_transform([corpus[_] for _ in candidates_idx])        
+        query_emb = vectorizer.transform([seed])        
         cosine_sim = cosine_similarity(query_emb, tfidf_matrix).flatten()
         idxs = cosine_sim.argsort()[::-1]
-        print("tf_idf+idxs:", idxs)
+        #print("tf_idf+idxs:", idxs)
 
         tmp_idxs = []
         for idx in idxs:
@@ -40,12 +39,17 @@ def tf_idf_sort(question, corpus, k):
     
     try:
         tfidf_matrix = vectorizer.fit_transform(sub_corpus)
-
+        # print("tfidf_matrix")
+        # print(tfidf_matrix)
         query_emb = vectorizer.transform([question])
+        print("query_emb")
+        print(query_emb)
         cosine_sim = cosine_similarity(query_emb, tfidf_matrix).flatten()
         idxs = cosine_sim.argsort()[::-1][:k]
-
-        return [sub_corpus[_] for _ in idxs]
+        print(question +" fenshu...")
+        print(cosine_sim)
+        return [sub_corpus[_] for _ in idxs], [cosine_sim[_] for _ in idxs]
+        #return [(sub_corpus[_], cosine_sim[_]) for _ in idxs]
     
     except Exception as e:
         return []

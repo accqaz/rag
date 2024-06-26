@@ -92,8 +92,6 @@ class KG_retriever(object):
     
     def retrieve(self, query, data, Gs):
         log = []
-        log.append("**************************************")
-        log.append("**************************************")
         log.append(query)
         log.append("Initial retrieval based on query==============")
         
@@ -108,7 +106,6 @@ class KG_retriever(object):
         seed = query
         all_corpus = []
         corpus = []
-        total_k = 60 # 多图一共可以检索到的文档数
         
         for graph_idx in range(graphs_idx):
             log.append("================================")
@@ -119,42 +116,40 @@ class KG_retriever(object):
             candidates_idx = list(range(len(corpus)))
             
             log.append(f"Corpus length: {len(corpus)}")
-            log.append(f"Corpus content: {corpus[0]}")
+            #log.append(f"Corpus content: {corpus[0]}")
             
             retrieve_idxs = []
-            prev_length = 0
             count = 0
+            prev_length = 0
             retrieve_num = [5, 5]
             
             while count < len(retrieve_num):
-                k_value = retrieve_num[count] if count < len(retrieve_num) else retrieve_num[-1]
-                idxs = tf_idf(seed, candidates_idx, corpus, k=k_value, visited=retrieve_idxs)
-                
-                log.append(f"Step {count + 1} - Retrieved indices based on seed '{seed}': {idxs}")
-                retrieve_idxs.extend(idxs[:max(0, total_k - len(retrieve_idxs))])
-                log.append(f"Current retrieved indices: {retrieve_idxs}")
-                
+                #k_value = retrieve_num[count] if count < len(retrieve_num) else retrieve_num[-1]
+                idxs = tf_idf(seed, candidates_idx, corpus, k=retrieve_num[count], visited=retrieve_idxs)
+                retrieve_idxs.extend(idxs)
+                #log.append(f"Step {count + 1} - Retrieved indices based on seed '{seed}': {idxs}")                
                 candidates_idx = set(chain(*[list(G.neighbors(node)) for node in idxs]))
                 candidates_idx = list(candidates_idx.difference(retrieve_idxs))
-                log.append(f"Candidate indices after neighbors and difference operation: {candidates_idx}")
-
+                #log.append(f"Candidate indices after neighbors and difference operation length: {len(candidates_idx)}")
+                #log.append(f"Candidate indices after neighbors and difference operation: {candidates_idx}")   
                 if len(retrieve_idxs) == prev_length:
                     break
                 else:
                     prev_length = len(retrieve_idxs)
-                
                 count += 1
             
             all_corpus.extend([corpus[idx] for idx in retrieve_idxs])
+            log.append(f"One retrieved idxs length: {len(retrieve_idxs)}")
             log.append(f"One retrieved idxs: {retrieve_idxs}")
             corpus = [] # 一个图遍历完之后，清空
         
-        final_retrieved_docs = tf_idf_sort(query, all_corpus, self.k)
-        log.append(f"Final retrieved documents: {final_retrieved_docs}")
-        # tmp = query[:2]
-        # # 将调试信息写入 JSON 文件
-        # with open("retrieval_{}.json".format(tmp), "w", encoding="utf-8") as log_file:
-        #     json.dump(log, log_file, ensure_ascii=False, indent=4)
+        final_retrieved_docs, score_list = tf_idf_sort(query, all_corpus, self.k)
+        log.append(f"Retrieval results with cosine similarity: {score_list}")
+        log.append(f"Retrieval results: {final_retrieved_docs}")
+        tmp = query[:2]
+        # 将调试信息写入 JSON 文件
+        with open("./{}/retrieval_{}.json".format("query-test", tmp), "w", encoding="utf-8") as log_file:
+            json.dump(log, log_file, ensure_ascii=False, indent=4)
         
         # 去重并选择相似度最高的前 10 个文档
         return final_retrieved_docs

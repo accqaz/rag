@@ -16,6 +16,7 @@ from pipeline.retriever import *
 import json
 from json import dumps, loads
 import os
+import httpx
 
 QA_TEMPLATE = """\
     上下文信息如下：
@@ -51,10 +52,20 @@ async def reciprocal_rank_fusion(results: list[list[dict]], k=60) -> list[dict]:
 
 async def main():
     config = dotenv_values(".env")
+    # try:
+    #     response = httpx.get("http://localhost:11434/status")
+    #     response.raise_for_status()
+    #     print("LLM server is running and accessible.")
+    # except httpx.HTTPStatusError as e:
+    #     print(f"LLM server returned HTTP error: {e.response.status_code}")
+    #     return
+    # except httpx.RequestError as e:
+    #     print(f"An error occurred while requesting LLM server: {e}")
+    #     return
 
     # 初始化 LLM 嵌入模型 和 Reranker
     llm = Ollama(
-        model="qwen", base_url=config["OLLAMA_URL"], temperature=0, request_timeout=120
+        model="qwen", base_url="http://localhost:11434", temperature=0, request_timeout=150
     )
     embeding = HuggingFaceEmbedding(
         model_name="BAAI/bge-small-zh-v1.5",
@@ -64,8 +75,8 @@ async def main():
     Settings.embed_model = embeding
 
     retriever = KG_retriever(k = 20)
-    queries = read_jsonl("question.jsonl")
-    #queries = queries[:2]
+    queries = read_jsonl("question1.jsonl")
+    queries = queries[:1]
 
     data = read_data("data")
     pipeline = await build_chunk()
@@ -91,18 +102,22 @@ async def main():
     for graph_type, doc_dict in graph_type_dict.items():
         formatted_docs_dict[graph_type] = [{'idx': idx, 'document_type': doc_type, 'title_chunks': title_chunks} for idx, (doc_type, title_chunks) in enumerate(doc_dict.items())]
 
+#     # 将 formatted_docs_dict 保存到文件中
+#     with open("formatted_docs.json", "w", encoding='utf-8') as f:
+#         json.dump(formatted_docs_dict, f, ensure_ascii=False, indent=4)
+        
     print(f"graph_type docs keys: {list(graph_type_dict.keys())}")
     print(f"Formatted docs keys: {list(formatted_docs_dict.keys())}")
     dataset = "data"
     subfolders = [f.name for f in os.scandir(dataset) if f.is_dir()]
-    print(f"subfolders: {subfolders}")
+    #print(f"subfolders: {subfolders}")
 
     Gs = {}
     for folder in subfolders:
-        print("1111111111111111111")
+        #print("1111111111111111111")
         if folder in formatted_docs_dict:
-            print(folder)
-            knn_embs_construct(folder, formatted_docs_dict[folder], 1)
+            #print(folder)
+            #knn_embs_construct(folder, formatted_docs_dict[folder], 1)
             Gs[folder] = knn_graph_construct(folder, formatted_docs_dict[folder], 5, 1)
             # 可视化图并保存
             # output_dir = f'./{folder}_graphs'
@@ -126,48 +141,6 @@ async def main():
             results.append(final_answer)
         
     save_answers(queries, results, "kg_retrieval_result.jsonl")
-
-
-    # # 初始化 数据ingestion pipeline 和 vector store
-    # client, vector_store = await build_vector_store(config, reindex=False)
-
-    # collection_info = await client.get_collection(
-    #     config["COLLECTION_NAME"] or "aiops24"
-    # )
-
-    # if collection_info.points_count == 0:
-    #     data = read_data("data")
-    #     pipeline = build_pipeline(llm, embeding, vector_store=vector_store)
-    #     # 暂时停止实时索引
-    #     await client.update_collection(
-    #         collection_name=config["COLLECTION_NAME"] or "aiops24",
-    #         optimizer_config=models.OptimizersConfigDiff(indexing_threshold=0),
-    #     )
-    #     await pipeline.arun(documents=data, show_progress=True, num_workers=1)
-    #     # 恢复实时索引
-    #     await client.update_collection(
-    #         collection_name=config["COLLECTION_NAME"] or "aiops24",
-    #         optimizer_config=models.OptimizersConfigDiff(indexing_threshold=20000),
-    #     )
-    #     print(len(data))
-
-    # retriever = QdrantRetriever(vector_store, embeding, similarity_top_k=2)
-
-    # queries = read_jsonl("question.jsonl")
-    # queries = queries[:2]
-
-    # # 生成答案
-    # print("Start generating answers...")
-
-    # results = []
-    # for query in tqdm(queries, total=len(queries)):
-    #     result = await generation_with_knowledge_retrieval(
-    #         query["query"], retriever, llm, debug=True,
-    #     )
-    #     results.append(result)
-
-    # # 处理结果
-    # save_answers(queries, results, "submit_result.jsonl")
 
 
 if __name__ == "__main__":

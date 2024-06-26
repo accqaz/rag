@@ -48,7 +48,7 @@ def build_pipeline(
 
 async def build_chunk() -> IngestionPipeline:
     transformation = [
-        SentenceSplitter(chunk_size=1024, chunk_overlap=50),
+        SentenceSplitter(chunk_size=256, chunk_overlap=50),
         CustomTitleExtractor(metadata_mode=MetadataMode.EMBED),
         CustomFilePathExtractor(last_path_length=4, metadata_mode=MetadataMode.EMBED),
         # SummaryExtractor(
