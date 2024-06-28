@@ -178,9 +178,9 @@ class KG_retriever(object):
         # log.append("Initial retrieval based on query==============")
         graphs_idx = self.bm25_retrieve(query, data, Gs)  #先初步获取要遍历的图的索引
         seed = query
-        all_corpus = []
+        all_contexts = {}
         contexts = []
-        for graph_idx in graphs_idx:
+        for graph_idx in graphs_idx[:3]:
             retrieve_idxs = []
             log.append("================================")
             log.append(f"Processing graph_idx: {graph_idx}")
@@ -196,29 +196,19 @@ class KG_retriever(object):
                 #context = seed + '\n' + corpus[idx]
                 next_reason = cal_llm(seed, corpus[idx], llm)
                 neighbor_idx = (list(G.neighbors(idx)))
-                next_contexts = tf_idf(next_reason, neighbor_idx, corpus, k = 5, visited = [])
+                next_contexts = tf_idf(next_reason, neighbor_idx, corpus, k = 10, visited = [])
                 if next_contexts != []:
                     contexts.extend([corpus[idx] + '\n' + corpus[_] for _ in next_contexts if corpus[_] != corpus[idx]])
                 else:
                     contexts.append(corpus[idx])
-
-        return contexts
+            all_contexts[graph_idx] = contexts
+            print(f"length of graph_idx:{graph_idx} contexts: {len(contexts)}")
+            contexts = []
+        context_idx = tf_idf_sort(seed, all_contexts)
+        return all_contexts[context_idx]
                 
 
-            
-            
-
-        final_retrieved_docs = tf_idf_sort(query, all_corpus, self.k)
-        log.append(f"Retrieval results: {final_retrieved_docs}")
-        tmp = query[:2]
-        # 将调试信息写入 JSON 文件
-        with open("./{}/retrieval_{}.json".format("query-test", tmp), "w", encoding="utf-8") as log_file:
-            json.dump(log, log_file, ensure_ascii=False, indent=4)
-
-        return final_retrieved_docs
-        #return []
-
-        
+      
 
         # print("KG_retriever==============")
         # #print(data)

@@ -7,14 +7,13 @@ import json
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.core import PromptTemplate
 from dotenv import dotenv_values
-from llama_index.legacy.llms import OpenAILike as OpenAI
+from llama_index.llms.ollama import Ollama
 # 初始化 LLM 模型
 config = dotenv_values(".env")
-llm = OpenAI(
-        api_key=config["GLM_KEY"],
-        model="glm-4",
-        api_base="https://open.bigmodel.cn/api/paas/v4/",
-        is_chat_model=True,
+
+    # 初始化 LLM 嵌入模型 和 Reranker
+llm = Ollama(
+        model="qwen", base_url="http://localhost:11434", temperature=0, request_timeout=150
     )
 
 embedding = HuggingFaceEmbedding(
@@ -22,6 +21,7 @@ embedding = HuggingFaceEmbedding(
         cache_folder="./",
         embed_batch_size=128,
     )
+
 def get_embeddings(texts):
     return embedding._embed(texts)
 
@@ -57,23 +57,28 @@ def tf_idf(seed, candidates_idx, corpus, k, visited):
         return []
 
 
-def tf_idf_sort(question, corpus, k):
-    sub_corpus = [c for c in corpus]
-    vectorizer = TfidfVectorizer()
+def tf_idf_sort(question, all_contexts):
+    sub_corpus = []
+    idx_to_graph = []
     
+    for graph_idx, contexts in all_contexts.items():
+        for context in contexts:
+            sub_corpus.append(context)
+            idx_to_graph.append(graph_idx)
+            
     try:
-        tfidf_matrix = vectorizer.fit_transform(sub_corpus)
-        # print("tfidf_matrix")
-        # print(tfidf_matrix)
-        query_emb = vectorizer.transform([question])
-        print("query_emb")
-        print(query_emb)
-        cosine_sim = cosine_similarity(query_emb, tfidf_matrix).flatten()
-        idxs = cosine_sim.argsort()[::-1][:k]
-        print(question +" fenshu...")
-        print(cosine_sim)
-        return [sub_corpus[_] for _ in idxs], [cosine_sim[_] for _ in idxs]
-        #return [(sub_corpus[_], cosine_sim[_]) for _ in idxs]
+        seed_emb = get_embeddings([question])[0]
+        candidates_embs = get_embeddings(sub_corpus)
+
+        # Compute cosine similarity between the seed embedding and the candidate embeddings
+        cosine_sim = cosine_similarity([seed_emb], candidates_embs).flatten()
+
+        top_idx = cosine_sim.argsort()[::-1][0]
+        print("top_idx")
+        print(top_idx)
+        print(idx_to_graph[top_idx])
+        # Return the corresponding idx_to_graph index
+        return idx_to_graph[top_idx]
     
     except Exception as e:
         return []

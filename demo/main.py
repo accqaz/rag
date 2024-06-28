@@ -1,6 +1,6 @@
 import asyncio
 import torch.multiprocessing as mp
-from kg.graph_construct import knn_graph_construct, knn_embs_construct, visualize_graphs
+from kg.graph_construct import knn_graph_construct, knn_embs_construct, visualize_graphs, save_graph_to_json
 from dotenv import dotenv_values
 from llama_index.core import Settings
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
@@ -16,7 +16,9 @@ from pipeline.retriever import *
 import json
 from json import dumps, loads
 import os
-import httpx
+from nltk.corpus import stopwords
+import spacy
+from networkx.readwrite import json_graph
 
 QA_TEMPLATE = """\
     上下文信息如下：
@@ -51,17 +53,8 @@ async def reciprocal_rank_fusion(results: list[list[dict]], k=60) -> list[dict]:
 
 
 async def main():
+    
     config = dotenv_values(".env")
-    # try:
-    #     response = httpx.get("http://localhost:11434/status")
-    #     response.raise_for_status()
-    #     print("LLM server is running and accessible.")
-    # except httpx.HTTPStatusError as e:
-    #     print(f"LLM server returned HTTP error: {e.response.status_code}")
-    #     return
-    # except httpx.RequestError as e:
-    #     print(f"An error occurred while requesting LLM server: {e}")
-    #     return
 
     # 初始化 LLM 嵌入模型 和 Reranker
     llm = Ollama(
@@ -75,8 +68,8 @@ async def main():
     Settings.embed_model = embeding
 
     retriever = KG_retriever(k = 20)
-    queries = read_jsonl("question1.jsonl")
-    queries = queries[:1]
+    queries = read_jsonl("question.jsonl")
+    queries = queries[:2]
 
     data = read_data("data")
     pipeline = await build_chunk()
@@ -102,23 +95,23 @@ async def main():
     for graph_type, doc_dict in graph_type_dict.items():
         formatted_docs_dict[graph_type] = [{'idx': idx, 'document_type': doc_type, 'title_chunks': title_chunks} for idx, (doc_type, title_chunks) in enumerate(doc_dict.items())]
 
-#     # 将 formatted_docs_dict 保存到文件中
-#     with open("formatted_docs.json", "w", encoding='utf-8') as f:
-#         json.dump(formatted_docs_dict, f, ensure_ascii=False, indent=4)
-        
-    print(f"graph_type docs keys: {list(graph_type_dict.keys())}")
-    print(f"Formatted docs keys: {list(formatted_docs_dict.keys())}")
+    # # 将 formatted_docs_dict 保存到文件中
+    # with open("formatted_docs.json", "w", encoding='utf-8') as f:
+    #     json.dump(formatted_docs_dict, f, ensure_ascii=False, indent=4)
+
     dataset = "data"
     subfolders = [f.name for f in os.scandir(dataset) if f.is_dir()]
-    #print(f"subfolders: {subfolders}")
-
+    #subfolders = ['director']
     Gs = {}
     for folder in subfolders:
-        #print("1111111111111111111")
         if folder in formatted_docs_dict:
-            #print(folder)
-            #knn_embs_construct(folder, formatted_docs_dict[folder], 1)
-            Gs[folder] = knn_graph_construct(folder, formatted_docs_dict[folder], 5, 1)
+            #knn_embs_construct(folder, formatted_docs_dict[folder], 2)
+            Gs[folder] = knn_graph_construct(folder, formatted_docs_dict[folder], 5, 2)
+            graph_folder = 'graph'
+            # os.makedirs(os.path.join(graph_folder, folder), exist_ok=True)  # 使用 os.path.join 来确保路径正确
+            # for idx, G in zip(range(len(Gs[folder])), Gs[folder]):
+            #     file_path = os.path.join(graph_folder, folder, f"graph_{folder}_{idx}.json")  # 同样使用 os.path.join
+            #     save_graph_to_json(G, file_path)
             # 可视化图并保存
             # output_dir = f'./{folder}_graphs'
             # visualize_graphs(Gs[folder], output_dir)
@@ -134,11 +127,11 @@ async def main():
         if doc_type in Gs:
             print(f"Processing query: {query['query']}, doc_type: {doc_type}")
             print(f"First data in Gs[doc_type]: {Gs[doc_type][0] if Gs[doc_type] else 'Empty Gs'}")
-            retrieved_docs = retriever.retrieve(query["query"], formatted_docs_dict[doc_type], Gs[doc_type])
-            qa_prompt_template = PromptTemplate(input_variables=["context_str", "query_str"], template=QA_TEMPLATE)
-            final_query = qa_prompt_template.format(context_str='\n'.join(retrieved_docs), query_str=query["query"])
-            final_answer = await llm.acomplete(final_query)
-            results.append(final_answer)
+            retrieved_docs = retriever.retrieve(query["query"], formatted_docs_dict[doc_type], Gs[doc_type], llm)
+            # qa_prompt_template = PromptTemplate(input_variables=["context_str", "query_str"], template=QA_TEMPLATE)
+            # final_query = qa_prompt_template.format(context_str='\n'.join(retrieved_docs), query_str=query["query"])
+            # final_answer = await llm.acomplete(final_query)
+            # results.append(final_answer)
         
     save_answers(queries, results, "kg_retrieval_result.jsonl")
 
