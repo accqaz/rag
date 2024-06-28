@@ -174,39 +174,54 @@ class KG_retriever(object):
     
     def retrieve(self, query, data, Gs, llm):
         log = []
-        # log.append(query)
-        # log.append("Initial retrieval based on query==============")
-        graphs_idx = self.bm25_retrieve(query, data, Gs)  #先初步获取要遍历的图的索引
+        graphs_idx = self.bm25_retrieve(query, data, Gs)  # 先初步获取要遍历的图的索引
         seed = query
         all_contexts = {}
         contexts = []
-        for graph_idx in graphs_idx[:3]:
+        log.append({"query": query, "initial_retrieval": graphs_idx})
+
+        for graph_idx in graphs_idx[:5]:
             retrieve_idxs = []
-            log.append("================================")
-            log.append(f"Processing graph_idx: {graph_idx}")
+            log.append({"separator": "================================"})
+            log.append({"processing_graph_idx": graph_idx})
             print(f"Processing graph_idx: {graph_idx}")
             corpus = []
             G = Gs[graph_idx]
             corpus = [text for _, text in data[graph_idx]['title_chunks']]
-            # self._initialize_bm25(corpus)
-            # candidates_idx = self.bm25_graph_retrieve(seed, 1)
             candidates_idx = list(range(len(corpus)))
-            initial_idxs =tf_idf(seed, candidates_idx, corpus, k = 5, visited = [])
+            print(f"candidates_idx: {len(candidates_idx)}")
+            log.append({"candidates_idx": len(candidates_idx)})
+            initial_idxs = tf_idf(seed, candidates_idx, corpus, 5, visited=[])
+            log.append({"graph_idx": graph_idx, "initial_idxs": initial_idxs})
+            print(f"initial_idxs:{initial_idxs}")
+
             for idx in initial_idxs:
-                #context = seed + '\n' + corpus[idx]
                 next_reason = cal_llm(seed, corpus[idx], llm)
-                neighbor_idx = (list(G.neighbors(idx)))
-                next_contexts = tf_idf(next_reason, neighbor_idx, corpus, k = 10, visited = [])
-                if next_contexts != []:
+                #print(f"next_reason:{next_reason}, {type(next_reason)}")
+                neighbor_idx = list(G.neighbors(idx))
+                next_contexts = tf_idf(next_reason, neighbor_idx, corpus, 5, visited=[])
+                #log.append({"idx": idx, "next_reason": next_reason, "neighbor_idx": neighbor_idx, "next_contexts": next_contexts})
+                #print(f"next_contexts:{next_contexts}")
+
+                if next_contexts:
                     contexts.extend([corpus[idx] + '\n' + corpus[_] for _ in next_contexts if corpus[_] != corpus[idx]])
                 else:
                     contexts.append(corpus[idx])
+
             all_contexts[graph_idx] = contexts
-            print(f"length of graph_idx:{graph_idx} contexts: {len(contexts)}")
+            log.append({"graph_idx": graph_idx, "contexts_length": len(contexts)})
+            #print(f"length of graph_idx:{graph_idx} contexts: {len(contexts)}")
             contexts = []
+
         context_idx = tf_idf_sort(seed, all_contexts)
+        log.append({"selected_context_idx": context_idx})
+
+        with open("log_{}.txt".format(query[:2]), "w", encoding="utf-8") as f:
+            for entry in log:
+                f.write(f"{entry}\n")
+        #return []
         return all_contexts[context_idx]
-                
+
 
       
 

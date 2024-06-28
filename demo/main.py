@@ -69,7 +69,7 @@ async def main():
 
     retriever = KG_retriever(k = 20)
     queries = read_jsonl("question.jsonl")
-    queries = queries[:2]
+    queries = queries[:1]
 
     data = read_data("data")
     pipeline = await build_chunk()
@@ -100,8 +100,8 @@ async def main():
     #     json.dump(formatted_docs_dict, f, ensure_ascii=False, indent=4)
 
     dataset = "data"
-    subfolders = [f.name for f in os.scandir(dataset) if f.is_dir()]
-    #subfolders = ['director']
+    #subfolders = [f.name for f in os.scandir(dataset) if f.is_dir()]
+    subfolders = ['rcp']
     Gs = {}
     for folder in subfolders:
         if folder in formatted_docs_dict:
@@ -128,10 +128,10 @@ async def main():
             print(f"Processing query: {query['query']}, doc_type: {doc_type}")
             print(f"First data in Gs[doc_type]: {Gs[doc_type][0] if Gs[doc_type] else 'Empty Gs'}")
             retrieved_docs = retriever.retrieve(query["query"], formatted_docs_dict[doc_type], Gs[doc_type], llm)
-            # qa_prompt_template = PromptTemplate(input_variables=["context_str", "query_str"], template=QA_TEMPLATE)
-            # final_query = qa_prompt_template.format(context_str='\n'.join(retrieved_docs), query_str=query["query"])
-            # final_answer = await llm.acomplete(final_query)
-            # results.append(final_answer)
+            qa_prompt_template = PromptTemplate(input_variables=["context_str", "query_str"], template=QA_TEMPLATE)
+            final_query = qa_prompt_template.format(context_str='\n'.join(retrieved_docs), query_str=query["query"])
+            final_answer = await llm.acomplete(final_query)
+            results.append(final_answer)
         
     save_answers(queries, results, "kg_retrieval_result.jsonl")
 

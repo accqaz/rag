@@ -28,32 +28,39 @@ def get_embeddings(texts):
 def tf_idf(seed, candidates_idx, corpus, k, visited):
     
     try:
+        print(f"seed type:{type(seed)}")
         seed_emb = get_embeddings([seed])[0]
         candidates_texts = [corpus[_] for _ in candidates_idx]
         candidates_embs = get_embeddings(candidates_texts)
-
+        #print(f"candidates_embs lenghth:{len(candidates_embs)}")
         # Compute cosine similarity between the seed embedding and the candidate embeddings
         cosine_sim = cosine_similarity([seed_emb], candidates_embs).flatten()
         # print(seed + " fenshu...")
-        # print(cosine_sim)
+        #print(cosine_sim)
 
         # Get the indices of the top-k most similar candidates
         idxs = cosine_sim.argsort()[::-1]
-
+        #print(f"idxs:{idxs}")
+        #print(f"candidates_idx:{candidates_idx}")
         tmp_idxs = []
         for idx in idxs:
+            #print(f"idx:{idx}")
+            #print(f"candidates_idx[{idx}]:{candidates_idx[idx]}")
+            #print(f"visited:{visited}")
             if candidates_idx[idx] not in visited:
                 tmp_idxs.append(candidates_idx[idx])
+                #print(f"cosine_sim[{idx}]:{cosine_sim[idx]}")
             
             k -= 1
 
             if k == 0:
+                print("被break了！！！！！")
                 break
-        print("tmp_idxs")
-        print(tmp_idxs)
+        #print(f"tmp_idxs:{tmp_idxs}")
         return tmp_idxs
 
     except Exception as e:
+        print(f"Error: {e}")
         return []
 
 
@@ -65,6 +72,7 @@ def tf_idf_sort(question, all_contexts):
         for context in contexts:
             sub_corpus.append(context)
             idx_to_graph.append(graph_idx)
+    print(f"length of sub_corpus:{sub_corpus}, length of idx_to_graph:{idx_to_graph}")
             
     try:
         seed_emb = get_embeddings([question])[0]
@@ -74,8 +82,7 @@ def tf_idf_sort(question, all_contexts):
         cosine_sim = cosine_similarity([seed_emb], candidates_embs).flatten()
 
         top_idx = cosine_sim.argsort()[::-1][0]
-        print("top_idx")
-        print(top_idx)
+        print(f"tf_idf_sort cosine_sin:{cosine_sim}")
         print(idx_to_graph[top_idx])
         # Return the corresponding idx_to_graph index
         return idx_to_graph[top_idx]
@@ -164,6 +171,7 @@ def cal_llm(seed, context, llm):
     final_query = QA_TEMPLATE.format(context_str=context, query_str=seed)
     # 获取模型的回答
     final_answer = llm.complete(final_query)
-    print("call_llm")
-    print(final_answer)
-    return final_answer
+    # print("call_llm")
+    # print(final_answer)
+    #print(f"response:{dir(final_answer)}")
+    return final_answer.text
