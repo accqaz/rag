@@ -16,12 +16,13 @@ from nltk.corpus import stopwords
 import pickle as pkl
 from sklearn.metrics.pairwise import cosine_similarity
 import jieba
+from nltk.corpus import stopwords as nltk_stopwords
 import os
 import json
 import networkx as nx
 import matplotlib.pyplot as plt
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-
+from networkx.readwrite import json_graph
 # # 加载NLTK中文停用词
 # stopwords = list(nltk_stopwords.words('chinese'))
 
@@ -155,15 +156,10 @@ def knn_embs(i_d):
         # 预处理 chunk
         #preprocessed_chunk = preprocess(chunk)
         chunks.append(chunk)
-        # preprocessed_chunks.append({
-        #     'original': chunk,
-        #     'preprocessed': preprocessed_chunk
-        # })
 
     # # 将所有 chunk 内容保存到一个 JSON 文件中
-    # file_name = f"chunks_{idx}.json"
-    # with open(file_name, "w", encoding='utf-8') as f:
-    #     json.dump(preprocessed_chunks, f, ensure_ascii=False, indent=4)
+    # with open("./{}/chunks_{}.json".format("chunks", idx), "w", encoding='utf-8') as f:
+    #     json.dump(chunks, f, ensure_ascii=False, indent=4)
 
     # 检查可用的CUDA设备
     num_cuda_devices = torch.cuda.device_count()
@@ -192,43 +188,85 @@ def knn_embs_construct(dataset, docs, num_processes):
 
     pkl.dump(embs, open('./{}/{}_embs.pkl'.format("dataset", dataset), 'wb'))
 
-    # 将 embs 转换为可序列化的格式
-    def serialize_emb(emb):
-        if isinstance(emb, torch.Tensor):
-            return emb.tolist()
-        elif isinstance(emb, np.ndarray):
-            return emb.tolist()
-        else:
-            return emb
+    # # 将 embs 转换为可序列化的格式
+    # def serialize_emb(emb):
+    #     if isinstance(emb, torch.Tensor):
+    #         return emb.tolist()
+    #     elif isinstance(emb, np.ndarray):
+    #         return emb.tolist()
+    #     else:
+    #         return emb
 
-    # 保存到 json 文件
-    json_embs = [{'idx': idx, 'emb': serialize_emb(emb)} for idx, emb in enumerate(embs)]
-    with open(f'./dataset/{dataset}_embs.json', 'w', encoding='utf-8') as f:
-        json.dump(json_embs, f, ensure_ascii=False, indent=4)
+    # # 保存到 json 文件
+    # json_embs = [{'idx': idx, 'emb': serialize_emb(emb)} for idx, emb in enumerate(embs)]
+    # with open(f'./dataset/{dataset}_embs.json', 'w', encoding='utf-8') as f:
+    #     json.dump(json_embs, f, ensure_ascii=False, indent=4)
 
-def knn_graph(i_d, k_knn, embs, strategy = 'cos'):
+
+def knn_graph(i_d, k_knn, embs, strategy='cos'):
     idx, d = i_d
-
     emb = embs[idx]
 
-    #build a knn Graph
+    # Build a knn Graph
     if strategy == 'cos':
-        sim = cosine_similarity(emb, emb)
-
+        sim = cosine_similarity(emb)
     elif strategy == 'dp':
         sim = np.matmul(emb, emb.transpose(1, 0))
 
-    #topk
-    top_idx = np.argsort(-sim, axis = 1)[:, 1:k_knn+1]
+    # Top k
+    top_idx = np.argsort(-sim, axis=1)[:, 1:k_knn + 1]
 
     tail_nodes = np.arange(top_idx.shape[0]).repeat(k_knn)
     head_nodes = top_idx.reshape(-1)
-    edges = [(node1, node2) for node1, node2 in zip(tail_nodes, head_nodes)]
+    sim_scores = sim[np.arange(sim.shape[0])[:, None], top_idx].flatten()
+    edges = [(node1, node2, score) for node1, node2, score in zip(tail_nodes, head_nodes, sim_scores)]
 
     G = nx.DiGraph()
-    G.add_edges_from(edges)
+    G.add_weighted_edges_from(edges, weight='similarity')
 
     return idx, G
+
+def save_graph_to_json(G, file_path):
+    data = json_graph.node_link_data(G)
+    # Convert numpy data types to native Python data types
+    for node in data['nodes']:
+        for k, v in node.items():
+            if isinstance(v, (np.integer, np.floating)):
+                node[k] = v.item()
+    for link in data['links']:
+        for k, v in link.items():
+            if isinstance(v, (np.integer, np.floating)):
+                link[k] = v.item()
+    with open(file_path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=4)
+
+
+
+
+
+# def knn_graph(i_d, k_knn, embs, strategy = 'cos'):
+#     idx, d = i_d
+
+#     emb = embs[idx]
+
+#     #build a knn Graph
+#     if strategy == 'cos':
+#         sim = cosine_similarity(emb, emb)
+
+#     elif strategy == 'dp':
+#         sim = np.matmul(emb, emb.transpose(1, 0))
+
+#     #topk
+#     top_idx = np.argsort(-sim, axis = 1)[:, 1:k_knn+1]
+
+#     tail_nodes = np.arange(top_idx.shape[0]).repeat(k_knn)
+#     head_nodes = top_idx.reshape(-1)
+#     edges = [(node1, node2) for node1, node2 in zip(tail_nodes, head_nodes)]
+
+#     G = nx.DiGraph()
+#     G.add_edges_from(edges)
+
+#     return idx, G
 
 def knn_graph_construct(dataset, docs, k_knn, num_processes, strategy = 'cos'):
     pool = mp.Pool(num_processes)

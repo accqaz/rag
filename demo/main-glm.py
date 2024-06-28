@@ -1,27 +1,36 @@
 import asyncio
-from typing import Iterable
+from kg.graph_construct import knn_graph_construct, knn_embs_construct, visualize_graphs, save_graph_to_json
 from dotenv import dotenv_values
 from llama_index.core import Settings
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.legacy.llms import OpenAILike as OpenAI
 from qdrant_client import models
 from tqdm.asyncio import tqdm
-import jsonlines
-from json import dumps, loads
-from typing import Iterable, List, Optional, Dict
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
-from pipeline.ingestion import build_pipeline, build_vector_store, read_data
-from pipeline.qa import read_jsonl, save_answers, save_inter_answers, save_inter_re_answers
+from pipeline.ingestion import read_data, build_chunk
+# from pipeline.ingestion import build_pipeline, build_vector_store, read_data
+from pipeline.qa import read_jsonl, save_answers
 from pipeline.rag import QdrantRetriever, generation_with_knowledge_retrieval
-from langchain.prompts import ChatPromptTemplate
-from llama_index.core import (
-    QueryBundle,
-    PromptTemplate,
-    StorageContext,
-    VectorStoreIndex,
-)
+import pickle as pkl
+from pipeline.retriever import *
+import json
+from json import dumps, loads
+import os
+from nltk.corpus import stopwords
+import spacy
+from networkx.readwrite import json_graph
 
-async def reciprocal_rank_fusion(results: List[List[Dict]], k=60) -> List[Dict]:
+QA_TEMPLATE = """\
+    上下文信息如下：
+    ----------
+    {context_str}
+    ----------
+    请你基于上下文信息而不是自己的知识，回答以下问题，可以分点作答，如果上下文信息没有相关知识，可以回答不确定，不要复述上下文信息：
+    {query_str}
+
+    回答：\
+    """
+
+async def reciprocal_rank_fusion(results: list[list[dict]], k=60) -> list[dict]:
     """Reciprocal_rank_fusion that takes multiple lists of ranked documents 
        and an optional parameter k used in the RRF formula"""
     
@@ -40,42 +49,10 @@ async def reciprocal_rank_fusion(results: List[List[Dict]], k=60) -> List[Dict]:
         for doc, score in sorted_docs_with_scores
     ][:10]
     return reranked_results
-    # for doc_with_score in reranked_results:
-    #     print(f"Doc: {doc_with_score['doc']}, Score: {doc_with_score['score']}")
-    # reranked_results = [
-    #     loads(doc)
-    #     for doc, score in sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)
-    # ][:10]
-    # print(f"reranked_results: {reranked_results}")
-    
-
-
-
-QA_TEMPLATE = """\
-    上下文信息如下：
-    ----------
-    {context_str}
-    ----------
-    请你基于上下文信息而不是自己的知识，回答以下问题，可以分点作答，如果上下文信息没有相关知识，可以回答不确定，不要复述上下文信息：
-    {query_str}
-
-    回答：\
-    """
-
-# Multi Query: Different Perspectives
-template = """你是一个可靠的AI语言模型助手。你的任务是生成三个不同版本的给定用户问题，以从向量数据库中检索相关文档。通过对用户问题生成多种视角，你的目标是帮助用户克服基于距离的相似性搜索的一些限制。原始问题：{question} \n
-输出（3个查询）："""
-prompt_perspectives = ChatPromptTemplate.from_template(template)
-
-async def generate_multi_queries(question, llm):
-    prompt = prompt_perspectives.format(question=question)
-    response = await llm.acomplete(prompt)
-    multi_queries = response.text.strip().split('\n')
-    return multi_queries
-
 
 
 async def main():
+    
     config = dotenv_values(".env")
 
     # 初始化 LLM 嵌入模型 和 Reranker
@@ -92,67 +69,116 @@ async def main():
     )
     Settings.embed_model = embeding
 
-    # Initialize data ingestion pipeline and vector store
-    client, vector_store = await build_vector_store(config, reindex=False)
+    retriever = KG_retriever(k = 20)
+    queries = read_jsonl("question1.jsonl")
+    queries = queries[:2]
 
-    collection_info = await client.get_collection(
-        config["COLLECTION_NAME"] or "aiops24"
-    )
+    data = read_data("data")
+    pipeline = await build_chunk()
+    processed_data = await pipeline.arun(documents=data, show_progress=True, num_workers=1)
+    
+    # # 将 processed_data 保存到文件中
+    # with open("processed_data.json", "w", encoding='utf-8') as f:
+    #     json.dump([doc.to_dict() for doc in processed_data], f, ensure_ascii=False, indent=4)
+    
+    # 创建一个字典来根据 graph_type 和 document_type 合并文档
+    graph_type_dict = {}
+    for doc in processed_data:
+        graph_type = doc.metadata['graph_type']
+        doc_type = doc.metadata['document_type']
+        if graph_type not in graph_type_dict:
+            graph_type_dict[graph_type] = {}
+        if doc_type not in graph_type_dict[graph_type]:
+            graph_type_dict[graph_type][doc_type] = []
+        graph_type_dict[graph_type][doc_type].append((doc.metadata['document_title'], doc.text))
+    
+    # 将字典转换为所需格式的列表
+    formatted_docs_dict = {}
+    for graph_type, doc_dict in graph_type_dict.items():
+        formatted_docs_dict[graph_type] = [{'idx': idx, 'document_type': doc_type, 'title_chunks': title_chunks} for idx, (doc_type, title_chunks) in enumerate(doc_dict.items())]
 
-    if collection_info.points_count == 0:
-        data = read_data("data")
-        corpus = [doc.text for doc in data]
-        print(len(data))
-        pipeline = build_pipeline(llm, embeding, vector_store=vector_store)
-        # Temporarily stop real-time indexing
-        await client.update_collection(
-            collection_name=config["COLLECTION_NAME"] or "aiops24",
-            optimizer_config=models.OptimizersConfigDiff(indexing_threshold=0),
-        )
-        await pipeline.arun(documents=data, show_progress=True, num_workers=1)
-        # Resume real-time indexing
-        await client.update_collection(
-            collection_name=config["COLLECTION_NAME"] or "aiops24",
-            optimizer_config=models.OptimizersConfigDiff(indexing_threshold=20000),
-        )
-        print("embedding done!")
+    # # 将 formatted_docs_dict 保存到文件中
+    # with open("formatted_docs.json", "w", encoding='utf-8') as f:
+    #     json.dump(formatted_docs_dict, f, ensure_ascii=False, indent=4)
 
-    retriever = QdrantRetriever(vector_store, embeding, similarity_top_k=5, corpus=corpus)
+    dataset = "data"
+    # subfolders = [f.name for f in os.scandir(dataset) if f.is_dir()]
+    subfolders = ['director']
+    Gs = {}
+    for folder in subfolders:
+        if folder in formatted_docs_dict:
+            #knn_embs_construct(folder, formatted_docs_dict[folder], 8)
+            Gs[folder] = knn_graph_construct(folder, formatted_docs_dict[folder], 5, 8)
+            # graph_folder = 'graph'
+            # os.makedirs(graph_folder, exist_ok=True)
+            # for idx, G in zip(range(len(Gs[folder])), Gs[folder]):
+            #     file_path = f"./{graph_folder}/graph_{folder}_{idx}.json"
+            #     save_graph_to_json(G, file_path)
+            # 可视化图并保存
+            # output_dir = f'./{folder}_graphs'
+            # visualize_graphs(Gs[folder], output_dir)
 
-    queries = read_jsonl("question.jsonl")
-    #queries = queries[:1]
-  
-    # Generate answers
-    print("Start generating answers...")
+    print("KGs加载成功。")
+    print({k: type(v) for k, v in Gs.items()})
 
     results = []
-    inter_docs = []
-    multi_queries_list = []
-    for query in tqdm(queries, total=len(queries)):
-        # Generate multiple queries
-        multi_queries = await generate_multi_queries(query["query"], llm)
-        multi_queries_list.append(multi_queries)
-        
-        # Retrieve information for each query
-        all_search_res = []
-        for mq in multi_queries:
-            multi_search_res = await retriever.multi_retrieve(QueryBundle(query_str=mq))
-            all_search_res.extend(multi_search_res)
-       
-        reranked_docs = await reciprocal_rank_fusion([all_search_res])
-        
-        print(f"Original query: {query['query']}")
 
-        # Generate final answer using Ollama with QA_TEMPLATE
-        qa_prompt_template = PromptTemplate(QA_TEMPLATE)
-        final_query = qa_prompt_template.format(context_str=reranked_docs, query_str=query["query"])
-        final_answer = await llm.acomplete(final_query)
-        results.append(final_answer)
-        inter_docs.append(reranked_docs)
+    # 使用检索器进行检索并生成答案
+    for query in tqdm(queries, desc="Processing queries"):
+        doc_type = query["document"]
+        if doc_type in Gs:
+            print(f"Processing query: {query['query']}, doc_type: {doc_type}")
+            print(f"First data in Gs[doc_type]: {Gs[doc_type][0] if Gs[doc_type] else 'Empty Gs'}")
+            retrieved_docs = retriever.retrieve(query["query"], formatted_docs_dict[doc_type], Gs[doc_type], llm)
+            # qa_prompt_template = PromptTemplate(input_variables=["context_str", "query_str"], template=QA_TEMPLATE)
+            # final_query = qa_prompt_template.format(context_str='\n'.join(retrieved_docs), query_str=query["query"])
+            # final_answer = await llm.acomplete(final_query)
+            # results.append(final_answer)
+        
+    save_answers(queries, results, "kg_retrieval_result.jsonl")
 
-    # Process results
-    save_answers(queries, results, "multi_retrieval_result.jsonl")
-    #save_inter_re_answers(queries, results, inter_docs, multi_queries_list, "inter_data_multi_retrieval.jsonl")
+
+    # # 初始化 数据ingestion pipeline 和 vector store
+    # client, vector_store = await build_vector_store(config, reindex=False)
+
+    # collection_info = await client.get_collection(
+    #     config["COLLECTION_NAME"] or "aiops24"
+    # )
+
+    # if collection_info.points_count == 0:
+    #     data = read_data("data")
+    #     pipeline = build_pipeline(llm, embeding, vector_store=vector_store)
+    #     # 暂时停止实时索引
+    #     await client.update_collection(
+    #         collection_name=config["COLLECTION_NAME"] or "aiops24",
+    #         optimizer_config=models.OptimizersConfigDiff(indexing_threshold=0),
+    #     )
+    #     await pipeline.arun(documents=data, show_progress=True, num_workers=1)
+    #     # 恢复实时索引
+    #     await client.update_collection(
+    #         collection_name=config["COLLECTION_NAME"] or "aiops24",
+    #         optimizer_config=models.OptimizersConfigDiff(indexing_threshold=20000),
+    #     )
+    #     print(len(data))
+
+    # retriever = QdrantRetriever(vector_store, embeding, similarity_top_k=2)
+
+    # queries = read_jsonl("question.jsonl")
+    # queries = queries[:2]
+
+    # # 生成答案
+    # print("Start generating answers...")
+
+    # results = []
+    # for query in tqdm(queries, total=len(queries)):
+    #     result = await generation_with_knowledge_retrieval(
+    #         query["query"], retriever, llm, debug=True,
+    #     )
+    #     results.append(result)
+
+    # # 处理结果
+    # save_answers(queries, results, "submit_result.jsonl")
+
 
 if __name__ == "__main__":
     asyncio.run(main())

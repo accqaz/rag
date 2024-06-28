@@ -4,18 +4,41 @@ from sentence_transformers import SentenceTransformer
 import spacy
 import requests
 import json
+from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+from llama_index.core import PromptTemplate
+from dotenv import dotenv_values
+from llama_index.legacy.llms import OpenAILike as OpenAI
+# 初始化 LLM 模型
+config = dotenv_values(".env")
+llm = OpenAI(
+        api_key=config["GLM_KEY"],
+        model="glm-4",
+        api_base="https://open.bigmodel.cn/api/paas/v4/",
+        is_chat_model=True,
+    )
 
-
+embedding = HuggingFaceEmbedding(
+        model_name="BAAI/bge-small-zh-v1.5",
+        cache_folder="./",
+        embed_batch_size=128,
+    )
+def get_embeddings(texts):
+    return embedding._embed(texts)
 
 def tf_idf(seed, candidates_idx, corpus, k, visited):
-    vectorizer = TfidfVectorizer()
     
     try:
-        tfidf_matrix = vectorizer.fit_transform([corpus[_] for _ in candidates_idx])        
-        query_emb = vectorizer.transform([seed])        
-        cosine_sim = cosine_similarity(query_emb, tfidf_matrix).flatten()
+        seed_emb = get_embeddings([seed])[0]
+        candidates_texts = [corpus[_] for _ in candidates_idx]
+        candidates_embs = get_embeddings(candidates_texts)
+
+        # Compute cosine similarity between the seed embedding and the candidate embeddings
+        cosine_sim = cosine_similarity([seed_emb], candidates_embs).flatten()
+        # print(seed + " fenshu...")
+        # print(cosine_sim)
+
+        # Get the indices of the top-k most similar candidates
         idxs = cosine_sim.argsort()[::-1]
-        #print("tf_idf+idxs:", idxs)
 
         tmp_idxs = []
         for idx in idxs:
@@ -26,7 +49,8 @@ def tf_idf(seed, candidates_idx, corpus, k, visited):
 
             if k == 0:
                 break
-
+        print("tmp_idxs")
+        print(tmp_idxs)
         return tmp_idxs
 
     except Exception as e:
@@ -121,3 +145,20 @@ def cal_local_llm_llama(input, port):
     return response_json['answer']
 
 
+def cal_llm(seed, context, llm):
+    QA_TEMPLATE = """\
+    上下文信息如下：
+    ----------
+    {context_str}
+    ----------
+    请你基于上下文信息而不是自己的知识，回答以下问题，可以分点作答，如果上下文信息没有相关知识，可以回答不确定，不要复述上下文信息：
+    {query_str}
+
+    回答：\
+    """
+    final_query = QA_TEMPLATE.format(context_str=context, query_str=seed)
+    # 获取模型的回答
+    final_answer = llm.complete(final_query)
+    print("call_llm")
+    print(final_answer)
+    return final_answer

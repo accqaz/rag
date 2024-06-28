@@ -103,3 +103,4 @@ jieba==0.42.1
 rank_bm25==0.2.2
 spacy==3.7.5
 matplotlib==3.9.0
+Levenshtein==0.25.1
