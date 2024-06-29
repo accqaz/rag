@@ -184,43 +184,56 @@ class KG_retriever(object):
             retrieve_idxs = []
             log.append({"separator": "================================"})
             log.append({"processing_graph_idx": graph_idx})
-            print(f"Processing graph_idx: {graph_idx}")
+            #print(f"Processing graph_idx: {graph_idx}")
             corpus = []
             G = Gs[graph_idx]
             corpus = [text for _, text in data[graph_idx]['title_chunks']]
             candidates_idx = list(range(len(corpus)))
-            print(f"candidates_idx: {len(candidates_idx)}")
+            #print(f"candidates_idx: {len(candidates_idx)}")
             log.append({"candidates_idx": len(candidates_idx)})
             initial_idxs = tf_idf(seed, candidates_idx, corpus, 5, visited=[])
             log.append({"graph_idx": graph_idx, "initial_idxs": initial_idxs})
-            print(f"initial_idxs:{initial_idxs}")
+            #print(f"initial_idxs:{initial_idxs}")
 
             for idx in initial_idxs:
-                next_reason = cal_llm(seed, corpus[idx], llm)
+
+                #next_reason = cal_llm(seed, corpus[idx], llm)
                 #print(f"next_reason:{next_reason}, {type(next_reason)}")
                 neighbor_idx = list(G.neighbors(idx))
-                next_contexts = tf_idf(next_reason, neighbor_idx, corpus, 5, visited=[])
+                next_contexts = tf_idf(seed, neighbor_idx, corpus, 10, visited=[])
                 #log.append({"idx": idx, "next_reason": next_reason, "neighbor_idx": neighbor_idx, "next_contexts": next_contexts})
                 #print(f"next_contexts:{next_contexts}")
 
                 if next_contexts:
-                    contexts.extend([corpus[idx] + '\n' + corpus[_] for _ in next_contexts if corpus[_] != corpus[idx]])
+                    contexts.append(corpus[idx])
+                    for next_idx in next_contexts:
+                        log.append({"corpus[": next_idx,"]": corpus[next_idx]})
+                        if corpus[next_idx] not in contexts:
+                            log.append({"next_idx": next_idx})
+                            contexts.append(corpus[next_idx])
+                    #contexts.extend([corpus[idx] + '\n' + corpus[_] for _ in next_contexts if corpus[_] != corpus[idx]])
                 else:
                     contexts.append(corpus[idx])
+                log.append({"end-if":"==================="})
+                #is_continue = cal_llm(seed, contexts, llm)
+                log.append({"start_spliter": "++++++++++++++++++++++++++++++++++++++++++"})
+                log.append({"idx": idx, "length of contexts": len(contexts), "next_contexts": next_contexts, "contexts": contexts})
+                log.append({"end_spliter": "++++++++++++++++++++++++++++++++++++++++++"})
+
 
             all_contexts[graph_idx] = contexts
             log.append({"graph_idx": graph_idx, "contexts_length": len(contexts)})
             #print(f"length of graph_idx:{graph_idx} contexts: {len(contexts)}")
             contexts = []
 
-        context_idx = tf_idf_sort(seed, all_contexts)
-        log.append({"selected_context_idx": context_idx})
+        #context_idx = tf_idf_sort(seed, all_contexts)
+        #log.append({"selected_context_idx": context_idx})
 
-        with open("log_{}.txt".format(query[:2]), "w", encoding="utf-8") as f:
+        with open("./logs/log_{}.txt".format(query[:3]), "w", encoding="utf-8") as f:
             for entry in log:
                 f.write(f"{entry}\n")
         #return []
-        return all_contexts[context_idx]
+        return all_contexts
 
 
       

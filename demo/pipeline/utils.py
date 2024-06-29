@@ -28,7 +28,7 @@ def get_embeddings(texts):
 def tf_idf(seed, candidates_idx, corpus, k, visited):
     
     try:
-        print(f"seed type:{type(seed)}")
+        #print(f"seed type:{type(seed)}")
         seed_emb = get_embeddings([seed])[0]
         candidates_texts = [corpus[_] for _ in candidates_idx]
         candidates_embs = get_embeddings(candidates_texts)
@@ -54,7 +54,7 @@ def tf_idf(seed, candidates_idx, corpus, k, visited):
             k -= 1
 
             if k == 0:
-                print("被break了！！！！！")
+                #print("被break了！！！！！")
                 break
         #print(f"tmp_idxs:{tmp_idxs}")
         return tmp_idxs
@@ -72,7 +72,7 @@ def tf_idf_sort(question, all_contexts):
         for context in contexts:
             sub_corpus.append(context)
             idx_to_graph.append(graph_idx)
-    print(f"length of sub_corpus:{sub_corpus}, length of idx_to_graph:{idx_to_graph}")
+    #print(f"length of sub_corpus:{len(sub_corpus)}, length of idx_to_graph:{len(idx_to_graph)}")
             
     try:
         seed_emb = get_embeddings([question])[0]
@@ -82,8 +82,9 @@ def tf_idf_sort(question, all_contexts):
         cosine_sim = cosine_similarity([seed_emb], candidates_embs).flatten()
 
         top_idx = cosine_sim.argsort()[::-1][0]
-        print(f"tf_idf_sort cosine_sin:{cosine_sim}")
-        print(idx_to_graph[top_idx])
+        # print(f"tf_idf_sort cosine_sin:{cosine_sim}")
+        # print(f"top_idx:{top_idx}")
+        #print(idx_to_graph[top_idx])
         # Return the corresponding idx_to_graph index
         return idx_to_graph[top_idx]
     
