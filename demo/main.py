@@ -25,7 +25,7 @@ QA_TEMPLATE = """\
     ----------
     {context_str}
     ----------
-    请你基于上下文信息而不是自己的知识，首先判断能否根据上下文信息回答以下问题，如果不能或者不确定请直接回答‘no’，否则回答‘yes’。如果你的回答为‘yes’，请根据上下文信息回答以下问题，可以分点作答，不要复述上下文信息：
+    请你基于上下文信息而不是自己的知识，回答以下问题，可以分点作答，如果上下文信息没有相关知识，可以回答不确定，不要复述上下文信息：
     {query_str}
     回答：\
     """
@@ -67,8 +67,8 @@ async def main():
     Settings.embed_model = embedding
 
     retriever = KG_retriever(k = 20)
-    queries = read_jsonl("question1.jsonl")
-    queries = queries[:1]
+    queries = read_jsonl("question.jsonl")
+    #queries = queries[:5]
 
     data = read_data("data")
     # pipeline = await build_chunk(embedding)
@@ -100,8 +100,8 @@ async def main():
     #     json.dump(formatted_docs_dict, f, ensure_ascii=False, indent=4)
 
     dataset = "data"
-    # subfolders = [f.name for f in os.scandir(dataset) if f.is_dir()]
-    subfolders = ['director']
+    subfolders = [f.name for f in os.scandir(dataset) if f.is_dir()]
+    #subfolders = ['director']
     Gs = {}
     for folder in subfolders:
         if folder in formatted_docs_dict:
@@ -128,17 +128,20 @@ async def main():
             print(f"Processing query: {query['query']}, doc_type: {doc_type}")
             print(f"First data in Gs[doc_type]: {Gs[doc_type][0] if Gs[doc_type] else 'Empty Gs'}")
             retrieved_docs = retriever.retrieve(query["query"], formatted_docs_dict[doc_type], Gs[doc_type], llm)
-            print(f"type of retrieved_docs:{type(retrieved_docs)}")
             qa_prompt_template = PromptTemplate(input_variables=["context_str", "query_str"], template=QA_TEMPLATE)
-            for doc in retrieved_docs:
-                print(f"retrieved_docs[{doc}]:{retrieved_docs[doc]}")
-                final_query = qa_prompt_template.format(context_str='\n'.join(retrieved_docs[doc]), query_str=query["query"])
-                
-                final_answer = await llm.acomplete(final_query)
-                print(f"final_answer:{final_answer}")
+            final_query = qa_prompt_template.format(context_str='\n'.join(retrieved_docs), query_str=query["query"])
+            final_answer = await llm.acomplete(final_query)
+            #print(f"final_answer:{final_answer}")
             results.append(final_answer)
+#             for doc in retrieved_docs:
+#                 print(f"retrieved_docs[{doc}]:{retrieved_docs[doc]}")
+#                 final_query = qa_prompt_template.format(context_str='\n'.join(retrieved_docs[doc]), query_str=query["query"])
+                
+#                 final_answer = await llm.acomplete(final_query)
+#                 print(f"final_answer:{final_answer}")
+#             results.append(final_answer)
         
-    #save_answers(queries, results, "kg_retrieval_result1.jsonl")
+    save_answers(queries, results, "kg_retrieval_result.jsonl")
 
 
 if __name__ == "__main__":

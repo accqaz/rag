@@ -161,8 +161,8 @@ class KG_retriever(object):
         log.append(f"Sorted graphs: {sorted_graphs}")
         log.append(f"graphs index: {[graph_idx for graph_idx, _ in sorted_graphs]}")
         tmp = query_str[:2]
-        with open(f"./query-test/retrieval_{tmp}.json", "w", encoding="utf-8") as log_file:
-            json.dump(log, log_file, ensure_ascii=False, indent=4)
+        # with open(f"./query-test/retrieval_{tmp}.json", "w", encoding="utf-8") as log_file:
+        #     json.dump(log, log_file, ensure_ascii=False, indent=4)
         
         return [graph_idx for graph_idx, _ in sorted_graphs]
     
@@ -177,64 +177,64 @@ class KG_retriever(object):
         graphs_idx = self.bm25_retrieve(query, data, Gs)  # 先初步获取要遍历的图的索引
         seed = query
         all_contexts = {}
+        yes_context = []
         contexts = []
+        yes_counts = {}  # 用于记录每个graph_idx的yes次数
         log.append({"query": query, "initial_retrieval": graphs_idx})
 
-        for graph_idx in graphs_idx[:5]:
+        for graph_idx in graphs_idx[:15]:
             retrieve_idxs = []
-            log.append({"separator": "================================"})
-            log.append({"processing_graph_idx": graph_idx})
-            #print(f"Processing graph_idx: {graph_idx}")
-            corpus = []
+            yes_count = 0  # 初始化yes计数
+            log.append({" strart_separator": "================================"})
             G = Gs[graph_idx]
             corpus = [text for _, text in data[graph_idx]['title_chunks']]
             candidates_idx = list(range(len(corpus)))
-            #print(f"candidates_idx: {len(candidates_idx)}")
             log.append({"candidates_idx": len(candidates_idx)})
-            initial_idxs = tf_idf(seed, candidates_idx, corpus, 5, visited=[])
+            initial_idxs = tf_idf(seed, candidates_idx, corpus, 20, visited=[])
             log.append({"graph_idx": graph_idx, "initial_idxs": initial_idxs})
-            #print(f"initial_idxs:{initial_idxs}")
-
+            context = ""
             for idx in initial_idxs:
+                if corpus[idx] not in contexts:
+                    answer, next_reason = cal_llm(seed, corpus[idx], llm)
+                    log.append({"answer": answer, "next_reason": next_reason})
+                    if answer == "yes":
+                        yes_count += 1  # 统计yes次数
+                        yes_context.append(corpus[idx])
+                        neighbor_idx = list(G.neighbors(idx))
+                        context = seed + '\n' + next_reason
+                        next_contexts = tf_idf(context, neighbor_idx, corpus, 5, visited=[])
 
-                #next_reason = cal_llm(seed, corpus[idx], llm)
-                #print(f"next_reason:{next_reason}, {type(next_reason)}")
-                neighbor_idx = list(G.neighbors(idx))
-                next_contexts = tf_idf(seed, neighbor_idx, corpus, 10, visited=[])
-                #log.append({"idx": idx, "next_reason": next_reason, "neighbor_idx": neighbor_idx, "next_contexts": next_contexts})
-                #print(f"next_contexts:{next_contexts}")
+                        if next_contexts:
+                            contexts.append(corpus[idx])
+                            for next_idx in next_contexts:
+                                log.append({"corpus[": next_idx, "]": corpus[next_idx]})
+                                if corpus[next_idx] not in contexts:
+                                    log.append({"next_idx": next_idx})
+                                    contexts.append(corpus[next_idx])
+                        else:
+                            contexts.append(corpus[idx])
 
-                if next_contexts:
-                    contexts.append(corpus[idx])
-                    for next_idx in next_contexts:
-                        log.append({"corpus[": next_idx,"]": corpus[next_idx]})
-                        if corpus[next_idx] not in contexts:
-                            log.append({"next_idx": next_idx})
-                            contexts.append(corpus[next_idx])
-                    #contexts.extend([corpus[idx] + '\n' + corpus[_] for _ in next_contexts if corpus[_] != corpus[idx]])
-                else:
-                    contexts.append(corpus[idx])
-                log.append({"end-if":"==================="})
-                #is_continue = cal_llm(seed, contexts, llm)
-                log.append({"start_spliter": "++++++++++++++++++++++++++++++++++++++++++"})
-                log.append({"idx": idx, "length of contexts": len(contexts), "next_contexts": next_contexts, "contexts": contexts})
-                log.append({"end_spliter": "++++++++++++++++++++++++++++++++++++++++++"})
-
-
+                        log.append({"start_idx": "++++++++++++++++++++++++++++++++++++++++++"})
+                        log.append({"idx": idx, "length of contexts": len(contexts), "context": context, "next_contexts": next_contexts, "contexts": contexts})
+                        log.append({"end_idx": "++++++++++++++++++++++++++++++++++++++++++"})
+            
             all_contexts[graph_idx] = contexts
-            log.append({"graph_idx": graph_idx, "contexts_length": len(contexts)})
-            #print(f"length of graph_idx:{graph_idx} contexts: {len(contexts)}")
+            yes_counts[graph_idx] = yes_count  # 记录当前graph_idx的yes次数
+            log.append({"graph_idx": graph_idx, "contexts_length": len(contexts), "yes_count": yes_count})
             contexts = []
+            log.append({" end_separator": "================================"})
 
-        #context_idx = tf_idf_sort(seed, all_contexts)
-        #log.append({"selected_context_idx": context_idx})
+        # 找出yes次数最多的graph_idx
+        max_yes_graph = max(yes_counts, key=yes_counts.get)
+        max_yes_contexts = all_contexts[max_yes_graph]
+        # 合并max_yes_contexts和yes_context并去重
+        final_contexts = list(set(max_yes_contexts + yes_context))
 
-        with open("./logs/log_{}.txt".format(query[:3]), "w", encoding="utf-8") as f:
-            for entry in log:
-                f.write(f"{entry}\n")
-        #return []
-        return all_contexts
+        # with open("./logs/log_{}.txt".format(query[:3]), "w", encoding="utf-8") as f:
+        #     for entry in log:
+        #         f.write(f"{entry}\n")
 
+        return final_contexts
 
       
 

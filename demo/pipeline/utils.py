@@ -164,15 +164,35 @@ def cal_llm(seed, context, llm):
     ----------
     {context_str}
     ----------
-    请你基于上下文信息而不是自己的知识，回答以下问题，可以分点作答，如果上下文信息没有相关知识，可以回答不确定，不要复述上下文信息：
+    请你基于上下文信息而不是自己的知识，判断所给上下文是否可以回答以下问题，回答只能为‘yes’或者‘no’。如果上下文信息没有相关知识或者不能确定，请直接回答‘no’；如果上下文信息包含相关知识请回答‘yes’。请务必对上下文信息进行一个判断：
     {query_str}
 
     回答：\
     """
+    QA_TEMPLATE_ANSWER = """\
+    上下文信息如下：
+    ----------
+    {context_str}
+    ----------
+    请你基于上下文信息而不是自己的知识，回答以下问题，可以分点回答，如果所给上下文不能完全回答问题，请给出需要补充哪些相关知识：
+    {query_str}
+
+    回答：\
+    """
+
+    # 使用 QA_TEMPLATE 进行判断
     final_query = QA_TEMPLATE.format(context_str=context, query_str=seed)
-    # 获取模型的回答
     final_answer = llm.complete(final_query)
-    # print("call_llm")
-    # print(final_answer)
-    #print(f"response:{dir(final_answer)}")
-    return final_answer.text
+    response = final_answer.text.strip()
+
+    if response == "yes":
+        # 使用 QA_TEMPLATE_ANSWER 进行进一步回答
+        final_query_answer = QA_TEMPLATE_ANSWER.format(context_str=context, query_str= seed)
+        final_answer_detail = llm.complete(final_query_answer)
+        content = final_answer_detail.text.strip()
+        answer = "yes"
+    else:
+        answer = "no"
+        content = "无法根据上下文信息回答问题。"
+    print(f"seed:{seed}, answer:{answer}, content:{content}")
+    return answer, content
