@@ -60,7 +60,7 @@ async def main():
         model="qwen", base_url="http://localhost:11434", temperature=0, request_timeout=150
     )
     embedding = HuggingFaceEmbedding(
-        model_name="BAAI/bge-small-zh-v1.5",
+        model_name="BAAI/bge-large-zh",
         cache_folder="./",
         embed_batch_size=128,
     )
@@ -68,18 +68,12 @@ async def main():
 
     retriever = KG_retriever(k = 20)
     queries = read_jsonl("question.jsonl")
-    #queries = queries[:5]
+    queries = queries[:50]
 
     data = read_data("data")
-    # pipeline = await build_chunk(embedding)
     pipeline = await build_chunk()
     processed_data = await pipeline.arun(documents=data, show_progress=True, num_workers=1)
-    
-    # # 将 processed_data 保存到文件中
-    # with open("processed_data.json", "w", encoding='utf-8') as f:
-    #     json.dump([doc.to_dict() for doc in processed_data], f, ensure_ascii=False, indent=4)
-    
-    # 创建一个字典来根据 graph_type 和 document_type 合并文档
+
     graph_type_dict = {}
     for doc in processed_data:
         graph_type = doc.metadata['graph_type']
@@ -89,15 +83,56 @@ async def main():
         if doc_type not in graph_type_dict[graph_type]:
             graph_type_dict[graph_type][doc_type] = []
         graph_type_dict[graph_type][doc_type].append((doc.metadata['document_title'], doc.text))
-    
-    # 将字典转换为所需格式的列表
+
+    # 合并相邻的 chunks
+    def merge_chunks(chunks, max_size=1200):
+        merged_chunks = []
+        current_chunk = ""
+        for title, text in chunks:
+            if len(current_chunk) + len(text) <= max_size:
+                if current_chunk:
+                    current_chunk += "\n"  # 加\n以确保合并后的文本块之间有\n
+                current_chunk += text
+            else:
+                if current_chunk:
+                    merged_chunks.append(current_chunk)
+                current_chunk = text
+        if current_chunk:  # 加入最后的 chunk
+            merged_chunks.append(current_chunk)
+        return merged_chunks
+
+    # 将字典转换为所需格式的列表，并合并 title_chunks
     formatted_docs_dict = {}
     for graph_type, doc_dict in graph_type_dict.items():
-        formatted_docs_dict[graph_type] = [{'idx': idx, 'document_type': doc_type, 'title_chunks': title_chunks} for idx, (doc_type, title_chunks) in enumerate(doc_dict.items())]
+        formatted_docs_dict[graph_type] = []
+        for idx, (doc_type, chunks) in enumerate(doc_dict.items()):
+            merged_chunks = merge_chunks(chunks)
+            formatted_docs_dict[graph_type].append({
+                'idx': idx,
+                'document_type': doc_type,
+                'title_chunks': merged_chunks
+            })
+#     doc_type_chunk_info = {}
+#     for graph_type, docs in formatted_docs_dict.items():
+#         if graph_type not in doc_type_chunk_info:
+#             doc_type_chunk_info[graph_type] = {}
+#         for doc in docs:
+#             doc_type = doc['document_type']
+#             if doc_type not in doc_type_chunk_info[graph_type]:
+#                 doc_type_chunk_info[graph_type][doc_type] = {
+#                     'total_chunks': 0,
+#                     'chunk_sizes': []
+#                 }
+#             doc_type_chunk_info[graph_type][doc_type]['total_chunks'] += len(doc['title_chunks'])
+#             chunk_sizes = [len(chunk) for chunk in doc['title_chunks']]
+#             doc_type_chunk_info[graph_type][doc_type]['chunk_sizes'].extend(chunk_sizes)
 
-    # # 将 formatted_docs_dict 保存到文件中
-    # with open("formatted_docs.json", "w", encoding='utf-8') as f:
-    #     json.dump(formatted_docs_dict, f, ensure_ascii=False, indent=4)
+#     # 保存统计结果到 JSON 文件中
+#     with open('doc_type_chunk_size_after.json', 'w', encoding='utf-8') as f:
+#         json.dump(doc_type_chunk_info, f, ensure_ascii=False, indent=4)
+#     #将 formatted_docs_dict 保存到文件中
+#     with open("formatted_docs_after.json", "w", encoding='utf-8') as f:
+#         json.dump(formatted_docs_dict, f, ensure_ascii=False, indent=4)
 
     dataset = "data"
     subfolders = [f.name for f in os.scandir(dataset) if f.is_dir()]
@@ -105,14 +140,14 @@ async def main():
     Gs = {}
     for folder in subfolders:
         if folder in formatted_docs_dict:
-            #knn_embs_construct(folder, formatted_docs_dict[folder], 2)
-            Gs[folder] = knn_graph_construct(folder, formatted_docs_dict[folder], 20, 2)
-            #graph_folder = 'graph'
+            #knn_embs_construct(folder, formatted_docs_dict[folder], 1)
+            Gs[folder] = knn_graph_construct(folder, formatted_docs_dict[folder], 20, 1)
+            # graph_folder = 'graph'
             # os.makedirs(os.path.join(graph_folder, folder), exist_ok=True)  # 使用 os.path.join 来确保路径正确
             # for idx, G in zip(range(len(Gs[folder])), Gs[folder]):
             #     file_path = os.path.join(graph_folder, folder, f"graph_{folder}_{idx}.json")  # 同样使用 os.path.join
             #     save_graph_to_json(G, file_path)
-            # 可视化图并保存
+            # # 可视化图并保存
             # output_dir = f'./{folder}_graphs'
             # visualize_graphs(Gs[folder], output_dir)
 
@@ -141,7 +176,7 @@ async def main():
 #                 print(f"final_answer:{final_answer}")
 #             results.append(final_answer)
         
-    save_answers(queries, results, "kg_retrieval_result.jsonl")
+    save_answers(queries, results, "kg_retrieval_result1.jsonl")
 
 
 if __name__ == "__main__":

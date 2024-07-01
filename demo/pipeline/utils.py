@@ -17,7 +17,7 @@ llm = Ollama(
     )
 
 embedding = HuggingFaceEmbedding(
-        model_name="BAAI/bge-small-zh-v1.5",
+        model_name="BAAI/bge-large-zh",
         cache_folder="./",
         embed_batch_size=128,
     )
@@ -38,7 +38,6 @@ def tf_idf(seed, candidates_idx, corpus, k, visited):
         # print(seed + " fenshu...")
         #print(cosine_sim)
 
-        # Get the indices of the top-k most similar candidates
         idxs = cosine_sim.argsort()[::-1]
         #print(f"idxs:{idxs}")
         #print(f"candidates_idx:{candidates_idx}")
@@ -52,9 +51,7 @@ def tf_idf(seed, candidates_idx, corpus, k, visited):
                 #print(f"cosine_sim[{idx}]:{cosine_sim[idx]}")
             
             k -= 1
-
             if k == 0:
-                #print("被break了！！！！！")
                 break
         #print(f"tmp_idxs:{tmp_idxs}")
         return tmp_idxs
@@ -169,16 +166,6 @@ def cal_llm(seed, context, llm):
 
     回答：\
     """
-    QA_TEMPLATE_ANSWER = """\
-    上下文信息如下：
-    ----------
-    {context_str}
-    ----------
-    请你基于上下文信息而不是自己的知识，回答以下问题，可以分点回答，如果所给上下文不能完全回答问题，请给出需要补充哪些相关知识：
-    {query_str}
-
-    回答：\
-    """
 
     # 使用 QA_TEMPLATE 进行判断
     final_query = QA_TEMPLATE.format(context_str=context, query_str=seed)
@@ -186,13 +173,7 @@ def cal_llm(seed, context, llm):
     response = final_answer.text.strip()
 
     if response == "yes":
-        # 使用 QA_TEMPLATE_ANSWER 进行进一步回答
-        final_query_answer = QA_TEMPLATE_ANSWER.format(context_str=context, query_str= seed)
-        final_answer_detail = llm.complete(final_query_answer)
-        content = final_answer_detail.text.strip()
         answer = "yes"
     else:
         answer = "no"
-        content = "无法根据上下文信息回答问题。"
-    print(f"seed:{seed}, answer:{answer}, content:{content}")
-    return answer, content
+    return answer
